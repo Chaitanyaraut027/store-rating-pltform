@@ -2,6 +2,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import authRoutes from "./routes/auth.routes.js";
 
 const app = express();
 
@@ -22,6 +23,9 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Auth routes
+app.use("/api/auth", authRoutes);
+
 // Handle unknown routes.
 app.use((req, res) => {
   res.status(404).json({
@@ -32,12 +36,16 @@ app.use((req, res) => {
 
 // Handle unexpected errors in one place.
 app.use((err, req, res, next) => {
-  console.error(err.message);
+  console.error("Request failed:", {
+    method: req.method,
+    path: req.path,
+    message: err.message,
+    code: err.code,
+  });
 
   res.status(500).json({
     success: false,
     message: "Internal server error",
   });
 });
-
 export default app;

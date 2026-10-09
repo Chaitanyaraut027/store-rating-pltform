@@ -6,6 +6,11 @@ import pool from "./config/database.js";
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
+  if (!process.env.JWT_SECRET) {
+    console.error("FATAL: JWT_SECRET environment variable is not set");
+    process.exit(1);
+  }
+
   try {
     await pool.query("SELECT 1");
 
