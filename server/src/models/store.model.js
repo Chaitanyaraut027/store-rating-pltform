@@ -41,6 +41,7 @@ export async function listStores({
   sortDir,
   limit,
   offset,
+  userId,
 }) {
   const conditions = [];
   const params = [];
@@ -64,6 +65,17 @@ export async function listStores({
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  // Make a copy of params for the count query before we add limit/offset/userId
+  const countParams = [...params];
+
+  let myRatingSelect = "";
+  let myRatingJoin = "";
+  if (userId) {
+    params.push(userId);
+    myRatingSelect = `, MAX(ur.rating)::int AS my_rating`;
+    myRatingJoin = `LEFT JOIN ratings ur ON ur.store_id = s.id AND ur.user_id = $${params.length}`;
+  }
+
   // Sorting fields and directions must be validated before use.
   const orderClause = `ORDER BY ${sortField} ${sortDir.toUpperCase()}`;
 
@@ -82,8 +94,10 @@ export async function listStores({
        s.owner_id,
        s.created_at,
        COALESCE(ROUND(AVG(r.rating), 2)::float, 0) AS average_rating
+       ${myRatingSelect}
      FROM stores s
      LEFT JOIN ratings r ON r.store_id = s.id
+     ${myRatingJoin}
      ${whereClause}
      GROUP BY s.id
      ${orderClause}
@@ -92,8 +106,6 @@ export async function listStores({
   );
 
   // Count matching stores for pagination.
-  const countParams = params.slice(0, -2);
-
   const countResult = await pool.query(
     `SELECT COUNT(DISTINCT s.id)::int AS total
      FROM stores s

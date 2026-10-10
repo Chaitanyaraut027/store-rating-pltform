@@ -5,6 +5,7 @@ import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import ownerRoutes from "./routes/owner.routes.js";
 import ratingRoutes from "./routes/rating.routes.js";
+import userRoutes from "./routes/user.routes.js";
 
 const app = express();
 
@@ -36,6 +37,9 @@ app.use("/api/owner", ownerRoutes);
 
 // User rating routes
 app.use("/api/ratings", ratingRoutes);
+
+// Normal user routes
+app.use("/api/user", userRoutes);
 
 // Handle unknown routes.
 app.use((req, res) => {
