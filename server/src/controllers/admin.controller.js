@@ -1,44 +1,120 @@
+import {
+  createUser,
+  findUserDetailsById,
+  findUserByEmail,
+  listUsers as listUsersModel,
+} from "../models/user.model.js";
 
-import { findUserById, createUser } from "../models/user.model.js";
+import {
+  getDashboardStats,
+  getStoreOwners,
+} from "../models/admin.model.js";
+
 import bcrypt from "bcrypt";
-import { registerSchema } from "../validators/auth.validator.js";
-import pool from "../config/database.js";
 
+import {
+  adminCreateUserSchema,
+  USER_FILTER_FIELDS,
+  USER_SORT_FIELDS,
+  SORT_DIRECTIONS,
+} from "../validators/admin.validator.js";
+
+import { registerSchema } from "../validators/auth.validator.js";
+
+const DEFAULT_SORT_FIELD = "created_at";
+const DEFAULT_SORT_DIR = "desc";
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 const BCRYPT_ROUNDS = 12;
 
-// Get platform statistics.
+// Get dashboard statistics.
 export async function getDashboard(req, res, next) {
   try {
-    const result = await pool.query(`
-      SELECT
-        (SELECT COUNT(*) FROM users WHERE role = 'USER')::int AS total_users,
-        (SELECT COUNT(*) FROM users WHERE role = 'STORE_OWNER')::int AS total_store_owners,
-        (SELECT COUNT(*) FROM stores)::int AS total_stores,
-        (SELECT COUNT(*) FROM ratings)::int AS total_ratings
-    `);
+    const stats = await getDashboardStats();
 
     return res.status(200).json({
       success: true,
-      data: result.rows[0],
+      data: stats,
     });
   } catch (error) {
     next(error);
   }
 }
 
-// List all normal users.
+// List users with filters and pagination.
 export async function listUsers(req, res, next) {
   try {
-    const result = await pool.query(`
-      SELECT id, name, email, address, role, created_at
-      FROM users
-      WHERE role = 'USER'
-      ORDER BY created_at DESC
-    `);
+    const sortField = req.query.sort_by ?? DEFAULT_SORT_FIELD;
+    const sortDir = (
+      req.query.sort_dir ?? DEFAULT_SORT_DIR
+    ).toLowerCase();
+
+    if (!USER_SORT_FIELDS.includes(sortField)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid sort_by value. Allowed: ${USER_SORT_FIELDS.join(", ")}`,
+      });
+    }
+
+    if (!SORT_DIRECTIONS.includes(sortDir)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid sort_dir value. Use 'asc' or 'desc'",
+      });
+    }
+
+    const rawPage = req.query.page ?? String(DEFAULT_PAGE);
+    const rawLimit = req.query.limit ?? String(DEFAULT_LIMIT);
+
+    const page = parseInt(rawPage, 10);
+    const limit = parseInt(rawLimit, 10);
+
+    if (isNaN(page) || page < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "page must be a positive integer",
+      });
+    }
+
+    if (isNaN(limit) || limit < 1 || limit > MAX_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        message: `limit must be between 1 and ${MAX_LIMIT}`,
+      });
+    }
+
+    const offset = (page - 1) * limit;
+    const filters = {};
+
+    // Apply supported filters.
+    for (const field of USER_FILTER_FIELDS) {
+      const value = req.query[field];
+
+      if (typeof value === "string" && value.trim()) {
+        filters[field] = value.trim();
+      }
+    }
+
+    const { users, total } = await listUsersModel({
+      filters,
+      sortField,
+      sortDir,
+      limit,
+      offset,
+    });
 
     return res.status(200).json({
       success: true,
-      data: { users: result.rows },
+      data: {
+        users,
+        pagination: {
+          page,
+          limit,
+          total,
+          total_pages: Math.ceil(total / limit),
+        },
+      },
     });
   } catch (error) {
     next(error);
@@ -48,7 +124,7 @@ export async function listUsers(req, res, next) {
 // Get a user by ID.
 export async function getUser(req, res, next) {
   try {
-    const user = await findUserById(req.params.id);
+    const user = await findUserDetailsById(req.params.id);
 
     if (!user) {
       return res.status(404).json({
@@ -66,41 +142,24 @@ export async function getUser(req, res, next) {
   }
 }
 
-// List store owners and their store ratings.
+// List store owners and their ratings.
 export async function listStoreOwners(req, res, next) {
   try {
-    const result = await pool.query(`
-      SELECT
-        u.id,
-        u.name,
-        u.email,
-        u.address,
-        u.role,
-        u.created_at,
-        s.id AS store_id,
-        s.name AS store_name,
-        ROUND(AVG(r.rating), 2)::float AS average_rating
-      FROM users u
-      LEFT JOIN stores s ON s.owner_id = u.id
-      LEFT JOIN ratings r ON r.store_id = s.id
-      WHERE u.role = 'STORE_OWNER'
-      GROUP BY u.id, s.id
-      ORDER BY u.created_at DESC
-    `);
+    const storeOwners = await getStoreOwners();
 
     return res.status(200).json({
       success: true,
-      data: { store_owners: result.rows },
+      data: { store_owners: storeOwners },
     });
   } catch (error) {
     next(error);
   }
 }
 
-// Create a normal user account.
-export async function createNormalUser(req, res, next) {
+// Create a user or admin account.
+export async function adminCreateUser(req, res, next) {
   try {
-    const parsed = registerSchema.safeParse(req.body);
+    const parsed = adminCreateUserSchema.safeParse(req.body);
 
     if (!parsed.success) {
       return res.status(400).json({
@@ -112,13 +171,11 @@ export async function createNormalUser(req, res, next) {
 
     const { name, address, password } = parsed.data;
     const email = parsed.data.email.toLowerCase();
+    const role = parsed.data.role || "USER";
 
-    const existing = await pool.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email]
-    );
+    const existing = await findUserByEmail(email);
 
-    if (existing.rows.length > 0) {
+    if (existing) {
       return res.status(409).json({
         success: false,
         message: "An account with this email already exists",
@@ -126,7 +183,14 @@ export async function createNormalUser(req, res, next) {
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = await createUser({ name, email, address, passwordHash });
+
+    const user = await createUser({
+      name,
+      email,
+      address,
+      passwordHash,
+      role,
+    });
 
     return res.status(201).json({
       success: true,
@@ -154,12 +218,9 @@ export async function createStoreOwner(req, res, next) {
     const { name, address, password } = parsed.data;
     const email = parsed.data.email.toLowerCase();
 
-    const existing = await pool.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email]
-    );
+    const existing = await findUserByEmail(email);
 
-    if (existing.rows.length > 0) {
+    if (existing) {
       return res.status(409).json({
         success: false,
         message: "An account with this email already exists",
@@ -168,17 +229,18 @@ export async function createStoreOwner(req, res, next) {
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    const result = await pool.query(
-      `INSERT INTO users (name, email, address, password_hash, role)
-       VALUES ($1, $2, $3, $4, 'STORE_OWNER')
-       RETURNING id, name, email, address, role, created_at`,
-      [name, email, address, passwordHash]
-    );
+    const user = await createUser({
+      name,
+      email,
+      address,
+      passwordHash,
+      role: "STORE_OWNER",
+    });
 
     return res.status(201).json({
       success: true,
       message: "Store owner account created successfully",
-      data: { user: result.rows[0] },
+      data: { user },
     });
   } catch (error) {
     next(error);
