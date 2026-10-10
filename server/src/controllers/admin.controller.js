@@ -45,9 +45,9 @@ export async function getDashboard(req, res, next) {
 // List users with filters and pagination.
 export async function listUsers(req, res, next) {
   try {
-    const sortField = req.query.sort_by ?? DEFAULT_SORT_FIELD;
+    const sortField = req.query.sortBy ?? req.query.sort_by ?? DEFAULT_SORT_FIELD;
     const sortDir = (
-      req.query.sort_dir ?? DEFAULT_SORT_DIR
+      req.query.sortOrder ?? req.query.sort_dir ?? DEFAULT_SORT_DIR
     ).toLowerCase();
 
     if (!USER_SORT_FIELDS.includes(sortField)) {

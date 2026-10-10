@@ -15,8 +15,8 @@ const MAX_LIMIT = 100;
 // Browse stores with filters, sorting, and pagination.
 export async function browseStores(req, res, next) {
   try {
-    const sortField = req.query.sort_by ?? DEFAULT_SORT_FIELD;
-    const sortDir = (req.query.sort_dir ?? DEFAULT_SORT_DIR).toLowerCase();
+    const sortField = req.query.sortBy ?? req.query.sort_by ?? DEFAULT_SORT_FIELD;
+    const sortDir = (req.query.sortOrder ?? req.query.sort_dir ?? DEFAULT_SORT_DIR).toLowerCase();
 
     // Validate sorting options.
     if (!STORE_SORT_FIELDS.includes(sortField)) {

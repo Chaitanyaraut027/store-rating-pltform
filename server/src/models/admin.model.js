@@ -23,7 +23,7 @@ export async function getStoreOwners() {
       u.created_at,
       s.id AS store_id,
       s.name AS store_name,
-      ROUND(AVG(r.rating), 2)::float AS average_rating
+      COALESCE(ROUND(AVG(r.rating), 2)::float, 0) AS average_rating
     FROM users u
     LEFT JOIN stores s ON s.owner_id = u.id
     LEFT JOIN ratings r ON r.store_id = s.id
