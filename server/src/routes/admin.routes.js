@@ -9,6 +9,10 @@ import {
   createNormalUser,
   createStoreOwner,
 } from "../controllers/admin.controller.js";
+import {
+  adminCreateStore,
+  adminListStores,
+} from "../controllers/store.controller.js";
 
 const router = Router();
 
@@ -21,5 +25,8 @@ router.get("/users/:id", getUser);
 router.get("/store-owners", listStoreOwners);
 router.post("/users", createNormalUser);
 router.post("/store-owners", createStoreOwner);
+
+router.post("/stores", adminCreateStore);
+router.get("/stores", adminListStores);
 
 export default router;
