@@ -88,7 +88,10 @@ export default function HomePage() {
             <Button variant="primary" onClick={() => document.getElementById('features').scrollIntoView({ behavior: 'smooth' })}>
               See Features
             </Button>
-            <Button variant="secondary">
+            <Button variant="secondary" as="a" href="/login" onClick={(e) => {
+              e.preventDefault();
+              window.location.href = '/login'; // Or use react-router-dom Link if refactored
+            }}>
               Sign In
             </Button>
           </div>

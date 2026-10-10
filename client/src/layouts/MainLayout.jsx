@@ -1,7 +1,16 @@
 import { Store } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+
+const ROLE_HOME = {
+  ADMIN: '/admin',
+  STORE_OWNER: '/owner',
+  USER: '/dashboard',
+}
 
 function Navbar() {
+  const { user } = useAuth()
+
   return (
     <header style={{
       position: 'sticky',
@@ -32,8 +41,22 @@ function Navbar() {
           Store Rating Platform
         </Link>
 
-        {/* Auth nav links will be added in Step 3 */}
-        <nav aria-label="Main navigation" />
+        <nav aria-label="Main navigation" style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'center' }}>
+          {user ? (
+            <Link to={ROLE_HOME[user.role] ?? '/'} style={{ fontSize: '0.875rem', fontWeight: 500 }}>
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link to="/login" style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+                Sign in
+              </Link>
+              <Link to="/register" style={{ fontSize: '0.875rem', fontWeight: 500 }}>
+                Sign up
+              </Link>
+            </>
+          )}
+        </nav>
       </div>
     </header>
   )
