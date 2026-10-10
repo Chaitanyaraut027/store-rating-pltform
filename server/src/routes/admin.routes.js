@@ -6,7 +6,7 @@ import {
   listUsers,
   getUser,
   listStoreOwners,
-  createNormalUser,
+  adminCreateUser,
   createStoreOwner,
 } from "../controllers/admin.controller.js";
 import {
@@ -23,7 +23,7 @@ router.get("/dashboard", getDashboard);
 router.get("/users", listUsers);
 router.get("/users/:id", getUser);
 router.get("/store-owners", listStoreOwners);
-router.post("/users", createNormalUser);
+router.post("/users", adminCreateUser);
 router.post("/store-owners", createStoreOwner);
 
 router.post("/stores", adminCreateStore);
