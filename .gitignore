@@ -8,3 +8,32 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local and temporary files
+.DS_Store
+Thumbs.db
+*.local
+
+# Editor files
+.vscode/
+.idea/
