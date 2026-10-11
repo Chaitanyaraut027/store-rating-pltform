@@ -1,11 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import MainLayout from '../../layouts/MainLayout'
 import Button from '../../components/common/Button'
 import Input from '../../components/common/Input'
 import Loader from '../../components/common/Loader'
 import EmptyState from '../../components/common/EmptyState'
+import Pagination from '../../components/common/Pagination'
+import RoleBadge from '../../components/common/RoleBadge'
+import UserDetailsModal from '../../components/admin/UserDetailsModal'
 import { getUsers, createUser } from '../../services/admin.service'
+import { ROLES } from '../../utils/constants'
+import { getErrorMessage } from '../../utils/errorHandler'
+import { formatDate } from '../../utils/formatters'
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([])
@@ -13,81 +19,140 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Filters and Sorting
+  // Search input state (buffered until Apply is clicked)
+  const [inputName, setInputName] = useState('')
+  const [inputEmail, setInputEmail] = useState('')
+  const [inputAddress, setInputAddress] = useState('')
+
+  // Applied Filters and Sorting
   const [searchName, setSearchName] = useState('')
   const [searchEmail, setSearchEmail] = useState('')
+  const [searchAddress, setSearchAddress] = useState('')
   const [filterRole, setFilterRole] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState('desc')
   const [page, setPage] = useState(1)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  // User Details Modal
+  const [selectedUserId, setSelectedUserId] = useState(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   // Create User Form
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [newUserData, setNewUserData] = useState({ name: '', email: '', address: '', password: '', role: 'USER' })
+  const [newUserData, setNewUserData] = useState({
+    name: '',
+    email: '',
+    address: '',
+    password: '',
+    role: ROLES.USER,
+  })
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
-  const fetchUsers = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const params = {
-        page,
-        limit: 10,
-        sortBy,
-        sortOrder,
-        ...(searchName.trim() && { name: searchName.trim() }),
-        ...(searchEmail.trim() && { email: searchEmail.trim() }),
-        ...(filterRole && { role: filterRole })
-      }
-      const data = await getUsers(params)
-      setUsers(data.users)
-      setPagination(data.pagination)
-    } catch (err) {
-      setError('Failed to fetch users. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, sortBy, sortOrder, searchName, searchEmail, filterRole])
-
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers])
+    let isSubscribed = true
+
+    async function loadUsers() {
+      try {
+        const params = {
+          page,
+          limit: 10,
+          sortBy,
+          sortOrder,
+          ...(searchName.trim() && { name: searchName.trim() }),
+          ...(searchEmail.trim() && { email: searchEmail.trim() }),
+          ...(searchAddress.trim() && { address: searchAddress.trim() }),
+          ...(filterRole && { role: filterRole }),
+        }
+        const data = await getUsers(params)
+        if (!isSubscribed) return
+        setUsers(data.users || [])
+        setPagination(data.pagination || { page: 1, limit: 10, total: 0, total_pages: 0 })
+        setError('')
+      } catch (err) {
+        if (!isSubscribed) return
+        setError(getErrorMessage(err, 'Failed to fetch users. Please try again.'))
+      } finally {
+        if (isSubscribed) setLoading(false)
+      }
+    }
+
+    loadUsers()
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [page, sortBy, sortOrder, searchName, searchEmail, searchAddress, filterRole, refreshKey])
 
   const handleSearch = (e) => {
     e.preventDefault()
+    setLoading(true)
     setPage(1)
-    fetchUsers()
+    setSearchName(inputName)
+    setSearchEmail(inputEmail)
+    setSearchAddress(inputAddress)
+    setRefreshKey((k) => k + 1)
+  }
+
+  const handlePageChange = (newPage) => {
+    setLoading(true)
+    setPage(newPage)
+  }
+
+  const handleFilterRoleChange = (e) => {
+    setLoading(true)
+    setFilterRole(e.target.value)
+    setPage(1)
+  }
+
+  const handleSortByChange = (e) => {
+    setLoading(true)
+    setSortBy(e.target.value)
+    setPage(1)
+  }
+
+  const handleSortOrderChange = (e) => {
+    setLoading(true)
+    setSortOrder(e.target.value)
+    setPage(1)
+  }
+
+  const handleViewDetails = (userId) => {
+    setSelectedUserId(userId)
+    setShowDetailsModal(true)
   }
 
   const handleCreateUser = async (e) => {
     e.preventDefault()
     setCreateError('')
-    setCreating(true)
 
-    // Basic frontend validation
-    if (!newUserData.name || !newUserData.email || !newUserData.password || !newUserData.address) {
+    if (
+      !newUserData.name.trim() ||
+      !newUserData.email.trim() ||
+      !newUserData.password ||
+      !newUserData.address.trim()
+    ) {
       setCreateError('All fields are required.')
-      setCreating(false)
       return
     }
 
     try {
-      await createUser(newUserData)
+      setCreating(true)
+      await createUser({
+        name: newUserData.name.trim(),
+        email: newUserData.email.trim(),
+        address: newUserData.address.trim(),
+        password: newUserData.password,
+        role: newUserData.role,
+      })
       setShowCreateForm(false)
-      setNewUserData({ name: '', email: '', address: '', password: '', role: 'USER' })
+      setNewUserData({ name: '', email: '', address: '', password: '', role: ROLES.USER })
+      setLoading(true)
       setPage(1)
-      fetchUsers()
+      setRefreshKey((k) => k + 1)
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to create user.'
-      // Display field errors if available
-      const fieldErrors = err.response?.data?.errors
-      if (fieldErrors) {
-        const first = Object.values(fieldErrors)[0]
-        setCreateError(Array.isArray(first) ? first[0] : first)
-      } else {
-        setCreateError(msg)
-      }
+      setCreateError(getErrorMessage(err, 'Failed to create user.'))
     } finally {
       setCreating(false)
     }
@@ -98,7 +163,9 @@ export default function AdminUsers() {
       <div className="page-container" style={{ padding: 'var(--sp-8) 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-6)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-            <Link to="/admin" className="btn btn-ghost" style={{ padding: 'var(--sp-2)' }}>&larr; Back</Link>
+            <Link to="/admin" className="btn btn-ghost" style={{ padding: 'var(--sp-2)' }}>
+              &larr; Back
+            </Link>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Manage Users</h1>
           </div>
           <Button variant="primary" onClick={() => setShowCreateForm(!showCreateForm)}>
@@ -109,9 +176,19 @@ export default function AdminUsers() {
         {/* Create User Form */}
         {showCreateForm && (
           <div className="card" style={{ marginBottom: 'var(--sp-6)' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>Create New User</h2>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>
+              Create New User
+            </h2>
             {createError && (
-              <div style={{ color: 'var(--color-error)', backgroundColor: 'var(--color-error-bg)', padding: 'var(--sp-3)', borderRadius: 'var(--radius)', marginBottom: 'var(--sp-4)' }}>
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  backgroundColor: 'var(--color-error-bg)',
+                  padding: 'var(--sp-3)',
+                  borderRadius: 'var(--radius)',
+                  marginBottom: 'var(--sp-4)',
+                }}
+              >
                 {createError}
               </div>
             )}
@@ -147,84 +224,100 @@ export default function AdminUsers() {
                 required
               />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-                <label className="input-label" htmlFor="role">Role</label>
+                <label className="input-label" htmlFor="role">
+                  Role
+                </label>
                 <select
                   id="role"
                   className="input-field"
                   value={newUserData.role}
                   onChange={(e) => setNewUserData({ ...newUserData, role: e.target.value })}
                 >
-                  <option value="USER">USER</option>
-                  <option value="STORE_OWNER">STORE_OWNER</option>
-                  <option value="ADMIN">ADMIN</option>
+                  <option value={ROLES.USER}>USER</option>
+                  <option value={ROLES.STORE_OWNER}>STORE_OWNER</option>
+                  <option value={ROLES.ADMIN}>ADMIN</option>
                 </select>
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                 <Button type="submit" variant="primary" disabled={creating} style={{ width: '100%' }}>
-                  {creating ? 'Creating...' : 'Create User'}
+                  {creating ? 'Creating…' : 'Create User'}
                 </Button>
               </div>
             </form>
           </div>
         )}
 
-        {/* Controls */}
+        {/* Search & Sort Controls */}
         <div className="card" style={{ marginBottom: 'var(--sp-6)', padding: 'var(--sp-4)' }}>
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <Input
               id="searchName"
               label="Search by Name"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
+              value={inputName}
+              onChange={(e) => setInputName(e.target.value)}
               style={{ flex: '1 1 150px' }}
             />
             <Input
               id="searchEmail"
               label="Search by Email"
-              value={searchEmail}
-              onChange={(e) => setSearchEmail(e.target.value)}
+              value={inputEmail}
+              onChange={(e) => setInputEmail(e.target.value)}
+              style={{ flex: '1 1 150px' }}
+            />
+            <Input
+              id="searchAddress"
+              label="Search by Address"
+              value={inputAddress}
+              onChange={(e) => setInputAddress(e.target.value)}
               style={{ flex: '1 1 150px' }}
             />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <label className="input-label" htmlFor="filterRole">Role</label>
+              <label className="input-label" htmlFor="filterRole">
+                Role
+              </label>
               <select
                 id="filterRole"
                 className="input-field"
                 value={filterRole}
-                onChange={(e) => { setFilterRole(e.target.value); setPage(1); }}
+                onChange={handleFilterRoleChange}
                 style={{ width: '130px' }}
               >
                 <option value="">All</option>
-                <option value="USER">USER</option>
-                <option value="STORE_OWNER">STORE OWNER</option>
-                <option value="ADMIN">ADMIN</option>
+                <option value={ROLES.USER}>USER</option>
+                <option value={ROLES.STORE_OWNER}>STORE OWNER</option>
+                <option value={ROLES.ADMIN}>ADMIN</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <label className="input-label" htmlFor="sortBy">Sort By</label>
+              <label className="input-label" htmlFor="sortBy">
+                Sort By
+              </label>
               <select
                 id="sortBy"
                 className="input-field"
                 value={sortBy}
-                onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+                onChange={handleSortByChange}
                 style={{ width: '130px' }}
               >
                 <option value="created_at">Date Joined</option>
                 <option value="name">Name</option>
                 <option value="email">Email</option>
+                <option value="address">Address</option>
                 <option value="role">Role</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <label className="input-label" htmlFor="sortOrder">Order</label>
+              <label className="input-label" htmlFor="sortOrder">
+                Order
+              </label>
               <select
                 id="sortOrder"
                 className="input-field"
                 value={sortOrder}
-                onChange={(e) => { setSortOrder(e.target.value); setPage(1); }}
+                onChange={handleSortOrderChange}
                 style={{ width: '110px' }}
               >
                 <option value="desc">Descending</option>
@@ -232,13 +325,15 @@ export default function AdminUsers() {
               </select>
             </div>
 
-            <Button type="submit" variant="primary">Apply</Button>
+            <Button type="submit" variant="primary">
+              Apply
+            </Button>
           </form>
         </div>
 
         {/* Users Table */}
         {loading ? (
-          <Loader label="Loading users..." />
+          <Loader label="Loading users…" />
         ) : error ? (
           <div style={{ color: 'var(--color-error)', textAlign: 'center', padding: 'var(--sp-8)' }}>
             {error}
@@ -252,29 +347,34 @@ export default function AdminUsers() {
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-alt)' }}>
                   <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem' }}>Name</th>
                   <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem' }}>Email</th>
+                  <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem' }}>Address</th>
                   <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem' }}>Role</th>
                   <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem' }}>Joined</th>
+                  <th style={{ padding: 'var(--sp-3) var(--sp-4)', fontWeight: 600, fontSize: '0.875rem', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map(u => (
+                {users.map((u) => (
                   <tr key={u.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem' }}>{u.name}</td>
+                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem', fontWeight: 500 }}>{u.name}</td>
                     <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem', color: 'var(--color-text-muted)' }}>{u.email}</td>
+                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.875rem', color: 'var(--color-text-muted)', maxWidth: '240px', wordBreak: 'break-word' }}>
+                      {u.address || '—'}
+                    </td>
                     <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem' }}>
-                      <span style={{
-                        padding: '0.125rem 0.5rem',
-                        borderRadius: '1rem',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        backgroundColor: u.role === 'ADMIN' ? '#fee2e2' : u.role === 'STORE_OWNER' ? '#fef3c7' : 'var(--color-primary-light)',
-                        color: u.role === 'ADMIN' ? '#991b1b' : u.role === 'STORE_OWNER' ? '#92400e' : 'var(--color-primary)'
-                      }}>
-                        {u.role}
-                      </span>
+                      <RoleBadge role={u.role} />
                     </td>
                     <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                      {new Date(u.created_at).toLocaleDateString()}
+                      {formatDate(u.created_at)}
+                    </td>
+                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', textAlign: 'right' }}>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleViewDetails(u.id)}
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                      >
+                        View Details
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -284,19 +384,21 @@ export default function AdminUsers() {
         )}
 
         {/* Pagination */}
-        {pagination.total_pages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-8)' }}>
-            <Button variant="secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-              Previous
-            </Button>
-            <span style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-              Page {page} of {pagination.total_pages}
-            </span>
-            <Button variant="secondary" disabled={page === pagination.total_pages} onClick={() => setPage(p => p + 1)}>
-              Next
-            </Button>
-          </div>
-        )}
+        <Pagination
+          page={page}
+          totalPages={pagination.total_pages}
+          onPageChange={handlePageChange}
+        />
+
+        {/* User Details Modal */}
+        <UserDetailsModal
+          isOpen={showDetailsModal}
+          onClose={() => {
+            setShowDetailsModal(false)
+            setSelectedUserId(null)
+          }}
+          userId={selectedUserId}
+        />
       </div>
     </MainLayout>
   )

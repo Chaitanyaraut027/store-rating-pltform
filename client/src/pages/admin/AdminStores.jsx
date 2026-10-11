@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import MainLayout from '../../layouts/MainLayout'
 import Button from '../../components/common/Button'
 import Input from '../../components/common/Input'
 import Loader from '../../components/common/Loader'
 import EmptyState from '../../components/common/EmptyState'
-import { getStores, createStore } from '../../services/admin.service'
+import Pagination from '../../components/common/Pagination'
+import { getStores, createStore, getStoreOwners } from '../../services/admin.service'
+import { getErrorMessage } from '../../utils/errorHandler'
+import { formatRating } from '../../utils/formatters'
 
 export default function AdminStores() {
   const [stores, setStores] = useState([])
@@ -13,84 +16,142 @@ export default function AdminStores() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Filters and Sorting
+  // Search input state (buffered until Apply is clicked)
+  const [inputName, setInputName] = useState('')
+  const [inputAddress, setInputAddress] = useState('')
+
+  // Applied Filters and Sorting
   const [searchName, setSearchName] = useState('')
   const [searchAddress, setSearchAddress] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState('desc')
   const [page, setPage] = useState(1)
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  // Create Store Form
+  // Create Store Form & Owners list
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [newStoreData, setNewStoreData] = useState({ name: '', email: '', address: '', owner_id: '' })
+  const [storeOwners, setStoreOwners] = useState([])
+  const [loadingOwners, setLoadingOwners] = useState(false)
+  const [ownersError, setOwnersError] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
-  const fetchStores = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const params = {
-        page,
-        limit: 10,
-        sortBy,
-        sortOrder,
-        ...(searchName.trim() && { name: searchName.trim() }),
-        ...(searchAddress.trim() && { address: searchAddress.trim() })
-      }
-      const data = await getStores(params)
-      setStores(data.stores)
-      setPagination(data.pagination)
-    } catch (err) {
-      setError('Failed to fetch stores. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, sortBy, sortOrder, searchName, searchAddress])
-
   useEffect(() => {
-    fetchStores()
-  }, [fetchStores])
+    let isSubscribed = true
+
+    async function loadStores() {
+      try {
+        const params = {
+          page,
+          limit: 10,
+          sortBy,
+          sortOrder,
+          ...(searchName.trim() && { name: searchName.trim() }),
+          ...(searchAddress.trim() && { address: searchAddress.trim() }),
+        }
+        const data = await getStores(params)
+        if (!isSubscribed) return
+        setStores(data.stores || [])
+        setPagination(data.pagination || { page: 1, limit: 10, total: 0, total_pages: 0 })
+        setError('')
+      } catch (err) {
+        if (!isSubscribed) return
+        setError(getErrorMessage(err, 'Failed to fetch stores. Please try again.'))
+      } finally {
+        if (isSubscribed) setLoading(false)
+      }
+    }
+
+    loadStores()
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [page, sortBy, sortOrder, searchName, searchAddress, refreshKey])
+
+  // Fetch store owners when the create form is opened
+  useEffect(() => {
+    if (!showCreateForm) return
+
+    let isSubscribed = true
+
+    getStoreOwners()
+      .then((owners) => {
+        if (isSubscribed) setStoreOwners(owners || [])
+      })
+      .catch((err) => {
+        if (isSubscribed) setOwnersError(getErrorMessage(err, 'Failed to load store owners list.'))
+      })
+      .finally(() => {
+        if (isSubscribed) setLoadingOwners(false)
+      })
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [showCreateForm])
+
+  const handleToggleCreateForm = () => {
+    if (!showCreateForm) {
+      setLoadingOwners(true)
+      setOwnersError('')
+    }
+    setShowCreateForm((prev) => !prev)
+  }
 
   const handleSearch = (e) => {
     e.preventDefault()
+    setLoading(true)
     setPage(1)
-    fetchStores()
+    setSearchName(inputName)
+    setSearchAddress(inputAddress)
+    setRefreshKey((k) => k + 1)
+  }
+
+  const handlePageChange = (newPage) => {
+    setLoading(true)
+    setPage(newPage)
+  }
+
+  const handleSortByChange = (e) => {
+    setLoading(true)
+    setSortBy(e.target.value)
+    setPage(1)
+  }
+
+  const handleSortOrderChange = (e) => {
+    setLoading(true)
+    setSortOrder(e.target.value)
+    setPage(1)
   }
 
   const handleCreateStore = async (e) => {
     e.preventDefault()
     setCreateError('')
-    setCreating(true)
 
-    // Basic frontend validation
-    if (!newStoreData.name || !newStoreData.email || !newStoreData.address) {
+    if (!newStoreData.name.trim() || !newStoreData.email.trim() || !newStoreData.address.trim()) {
       setCreateError('Name, email, and address are required.')
-      setCreating(false)
       return
     }
 
     try {
-      // payload expects owner_id as number if provided
+      setCreating(true)
       const payload = {
-        ...newStoreData,
-        owner_id: newStoreData.owner_id ? parseInt(newStoreData.owner_id, 10) : undefined
+        name: newStoreData.name.trim(),
+        email: newStoreData.email.trim(),
+        address: newStoreData.address.trim(),
+        owner_id: newStoreData.owner_id ? parseInt(newStoreData.owner_id, 10) : undefined,
       }
 
       await createStore(payload)
       setShowCreateForm(false)
       setNewStoreData({ name: '', email: '', address: '', owner_id: '' })
+      setLoading(true)
       setPage(1)
-      fetchStores()
+      setRefreshKey((k) => k + 1)
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to create store.'
-      const fieldErrors = err.response?.data?.errors
-      if (fieldErrors) {
-        const first = Object.values(fieldErrors)[0]
-        setCreateError(Array.isArray(first) ? first[0] : first)
-      } else {
-        setCreateError(msg)
-      }
+      setCreateError(getErrorMessage(err, 'Failed to create store.'))
     } finally {
       setCreating(false)
     }
@@ -101,10 +162,12 @@ export default function AdminStores() {
       <div className="page-container" style={{ padding: 'var(--sp-8) 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-6)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-            <Link to="/admin" className="btn btn-ghost" style={{ padding: 'var(--sp-2)' }}>&larr; Back</Link>
+            <Link to="/admin" className="btn btn-ghost" style={{ padding: 'var(--sp-2)' }}>
+              &larr; Back
+            </Link>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Manage Stores</h1>
           </div>
-          <Button variant="primary" onClick={() => setShowCreateForm(!showCreateForm)}>
+          <Button variant="primary" onClick={handleToggleCreateForm}>
             {showCreateForm ? 'Cancel' : 'Add Store'}
           </Button>
         </div>
@@ -112,9 +175,19 @@ export default function AdminStores() {
         {/* Create Store Form */}
         {showCreateForm && (
           <div className="card" style={{ marginBottom: 'var(--sp-6)' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>Create New Store</h2>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>
+              Create New Store
+            </h2>
             {createError && (
-              <div style={{ color: 'var(--color-error)', backgroundColor: 'var(--color-error-bg)', padding: 'var(--sp-3)', borderRadius: 'var(--radius)', marginBottom: 'var(--sp-4)' }}>
+              <div
+                style={{
+                  color: 'var(--color-error)',
+                  backgroundColor: 'var(--color-error-bg)',
+                  padding: 'var(--sp-3)',
+                  borderRadius: 'var(--radius)',
+                  marginBottom: 'var(--sp-4)',
+                }}
+              >
                 {createError}
               </div>
             )}
@@ -141,48 +214,71 @@ export default function AdminStores() {
                 onChange={(e) => setNewStoreData({ ...newStoreData, address: e.target.value })}
                 required
               />
-              <Input
-                id="owner_id"
-                label="Owner ID (Optional)"
-                type="number"
-                value={newStoreData.owner_id}
-                onChange={(e) => setNewStoreData({ ...newStoreData, owner_id: e.target.value })}
-                hint="Must belong to a valid STORE_OWNER"
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+                <label className="input-label" htmlFor="owner_id">
+                  Assigned Store Owner (Optional)
+                </label>
+                <select
+                  id="owner_id"
+                  className="input-field"
+                  value={newStoreData.owner_id}
+                  onChange={(e) => setNewStoreData({ ...newStoreData, owner_id: e.target.value })}
+                  disabled={loadingOwners}
+                >
+                  <option value="">-- No Owner Assigned --</option>
+                  {storeOwners.map((owner) => (
+                    <option key={owner.id} value={owner.id}>
+                      {owner.name} ({owner.email})
+                    </option>
+                  ))}
+                </select>
+                {loadingOwners && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    Loading store owners…
+                  </span>
+                )}
+                {ownersError && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-error)' }}>
+                    {ownersError}
+                  </span>
+                )}
+              </div>
               <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end' }}>
                 <Button type="submit" variant="primary" disabled={creating} style={{ width: '200px' }}>
-                  {creating ? 'Creating...' : 'Create Store'}
+                  {creating ? 'Creating…' : 'Create Store'}
                 </Button>
               </div>
             </form>
           </div>
         )}
 
-        {/* Controls */}
+        {/* Search & Sort Controls */}
         <div className="card" style={{ marginBottom: 'var(--sp-6)', padding: 'var(--sp-4)' }}>
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <Input
               id="searchName"
               label="Search by Name"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
+              value={inputName}
+              onChange={(e) => setInputName(e.target.value)}
               style={{ flex: '1 1 150px' }}
             />
             <Input
               id="searchAddress"
               label="Search by Address"
-              value={searchAddress}
-              onChange={(e) => setSearchAddress(e.target.value)}
+              value={inputAddress}
+              onChange={(e) => setInputAddress(e.target.value)}
               style={{ flex: '1 1 150px' }}
             />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <label className="input-label" htmlFor="sortBy">Sort By</label>
+              <label className="input-label" htmlFor="sortBy">
+                Sort By
+              </label>
               <select
                 id="sortBy"
                 className="input-field"
                 value={sortBy}
-                onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+                onChange={handleSortByChange}
                 style={{ width: '130px' }}
               >
                 <option value="created_at">Date Added</option>
@@ -193,12 +289,14 @@ export default function AdminStores() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <label className="input-label" htmlFor="sortOrder">Order</label>
+              <label className="input-label" htmlFor="sortOrder">
+                Order
+              </label>
               <select
                 id="sortOrder"
                 className="input-field"
                 value={sortOrder}
-                onChange={(e) => { setSortOrder(e.target.value); setPage(1); }}
+                onChange={handleSortOrderChange}
                 style={{ width: '110px' }}
               >
                 <option value="desc">Descending</option>
@@ -206,13 +304,15 @@ export default function AdminStores() {
               </select>
             </div>
 
-            <Button type="submit" variant="primary">Apply</Button>
+            <Button type="submit" variant="primary">
+              Apply
+            </Button>
           </form>
         </div>
 
         {/* Stores Table */}
         {loading ? (
-          <Loader label="Loading stores..." />
+          <Loader label="Loading stores…" />
         ) : error ? (
           <div style={{ color: 'var(--color-error)', textAlign: 'center', padding: 'var(--sp-8)' }}>
             {error}
@@ -231,9 +331,11 @@ export default function AdminStores() {
                 </tr>
               </thead>
               <tbody>
-                {stores.map(store => (
+                {stores.map((store) => (
                   <tr key={store.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem', fontWeight: 500 }}>{store.name}</td>
+                    <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem', fontWeight: 500 }}>
+                      {store.name}
+                    </td>
                     <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
                       <div>{store.email}</div>
                       <div style={{ marginTop: '2px', fontSize: '0.8125rem' }}>{store.address}</div>
@@ -249,7 +351,7 @@ export default function AdminStores() {
                       )}
                     </td>
                     <td style={{ padding: 'var(--sp-3) var(--sp-4)', fontSize: '0.9375rem', fontWeight: 500 }}>
-                      {store.average_rating ? Number(store.average_rating).toFixed(1) : '-'}
+                      {formatRating(store.average_rating, '-')}
                     </td>
                   </tr>
                 ))}
@@ -259,19 +361,11 @@ export default function AdminStores() {
         )}
 
         {/* Pagination */}
-        {pagination.total_pages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-8)' }}>
-            <Button variant="secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-              Previous
-            </Button>
-            <span style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-              Page {page} of {pagination.total_pages}
-            </span>
-            <Button variant="secondary" disabled={page === pagination.total_pages} onClick={() => setPage(p => p + 1)}>
-              Next
-            </Button>
-          </div>
-        )}
+        <Pagination
+          page={page}
+          totalPages={pagination.total_pages}
+          onPageChange={handlePageChange}
+        />
       </div>
     </MainLayout>
   )
