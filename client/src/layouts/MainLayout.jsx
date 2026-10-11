@@ -13,7 +13,7 @@ function Navbar() {
   const navigate = useNavigate()
 
   const [theme, setTheme] = useState(() => {
-    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
   })
 
   const [menuOpen, setMenuOpen] = useState(false)
