@@ -64,21 +64,32 @@ export default function UserDashboard() {
     fetchStores()
   }
 
+  const [ratingError, setRatingError] = useState({})
+
   const handleRatingSubmit = async (storeId) => {
     const ratingValue = parseInt(ratingInput[storeId], 10)
+    const storeIdNum = parseInt(storeId, 10) // Ensure storeId is a number for Zod validation
+
     if (isNaN(ratingValue) || ratingValue < 1 || ratingValue > 5) {
-      alert('Rating must be between 1 and 5.')
+      setRatingError(prev => ({ ...prev, [storeId]: 'Rating must be between 1 and 5.' }))
       return
     }
 
     setSubmittingRating(prev => ({ ...prev, [storeId]: true }))
+    setRatingError(prev => ({ ...prev, [storeId]: null }))
+
     try {
-      await submitRating(storeId, ratingValue)
+      await submitRating(storeIdNum, ratingValue)
       // Optimistically update the UI or refetch
       fetchStores()
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to submit rating.'
-      alert(msg)
+      const fieldErrors = err.response?.data?.errors
+      let msg = err.response?.data?.message || 'Failed to submit rating.'
+      if (fieldErrors) {
+        const first = Object.values(fieldErrors)[0]
+        msg = Array.isArray(first) ? first[0] : first
+      }
+      setRatingError(prev => ({ ...prev, [storeId]: msg }))
     } finally {
       setSubmittingRating(prev => ({ ...prev, [storeId]: false }))
     }
@@ -164,29 +175,36 @@ export default function UserDashboard() {
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                  <label htmlFor={`rating-${store.id}`} className="input-label" style={{ margin: 0 }}>Your Rating:</label>
-                  <select
-                    id={`rating-${store.id}`}
-                    className="input-field"
-                    value={ratingInput[store.id] || ''}
-                    onChange={(e) => setRatingInput(prev => ({ ...prev, [store.id]: e.target.value }))}
-                    style={{ width: '70px', padding: 'var(--sp-1)' }}
-                  >
-                    <option value="">-</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
-                  </select>
-                  <Button
-                    variant={store.user_rating ? "secondary" : "primary"}
-                    onClick={() => handleRatingSubmit(store.id)}
-                    disabled={submittingRating[store.id] || !ratingInput[store.id] || Number(ratingInput[store.id]) === store.user_rating}
-                  >
-                    {submittingRating[store.id] ? 'Saving...' : store.user_rating ? 'Update' : 'Submit'}
-                  </Button>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 'var(--sp-2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                    <label htmlFor={`rating-${store.id}`} className="input-label" style={{ margin: 0 }}>Your Rating:</label>
+                    <select
+                      id={`rating-${store.id}`}
+                      className="input-field"
+                      value={ratingInput[store.id] || ''}
+                      onChange={(e) => setRatingInput(prev => ({ ...prev, [store.id]: e.target.value }))}
+                      style={{ width: '70px', padding: 'var(--sp-1)' }}
+                    >
+                      <option value="">-</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
+                    </select>
+                    <Button
+                      variant={store.user_rating ? "secondary" : "primary"}
+                      onClick={() => handleRatingSubmit(store.id)}
+                      disabled={submittingRating[store.id] || !ratingInput[store.id] || Number(ratingInput[store.id]) === store.user_rating}
+                    >
+                      {submittingRating[store.id] ? 'Saving...' : store.user_rating ? 'Update' : 'Submit'}
+                    </Button>
+                  </div>
+                  {ratingError[store.id] && (
+                    <div style={{ color: 'var(--color-error)', fontSize: '0.8125rem' }}>
+                      {ratingError[store.id]}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
