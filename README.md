@@ -276,10 +276,14 @@ store-rating-platfrom/
 
 ## Future Improvements
 
-- Add rate limiting to authentication endpoints.
+- Add rate limiting to authentication endpoints to prevent brute-force attacks.
 - Improve the rating update experience by ensuring existing ratings are preselected in the frontend.
 - Add automated end-to-end tests for complete user workflows.
-- Implement store image uploads.
+- Implement store image uploads with cloud storage integration.
+- Integrate Firebase Cloud Messaging (FCM) for push notifications.
+- Containerize the frontend and backend using Docker for consistent deployment across environments.
+- Implement centralized error handling and structured logging for easier debugging and maintenance.
+- Secure API endpoints with role-based access control (RBAC) and input validation.
 
 ---
 
