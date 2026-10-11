@@ -3,70 +3,49 @@ import { Link, useNavigate, Navigate } from 'react-router-dom'
 import AuthLayout from '../../layouts/AuthLayout'
 import Input from '../../components/common/Input'
 import Button from '../../components/common/Button'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { register } from '../../services/auth.service'
+import { getErrorMessage } from '../../utils/errorHandler'
+import {
+  validateName,
+  validateEmail,
+  validateAddress,
+  validatePassword,
+} from '../../utils/validation'
 
-function getErrorMessage(err) {
-  // Surface the first field-level error if the backend returns them
-  const fieldErrors = err?.response?.data?.errors
-  if (fieldErrors) {
-    const first = Object.values(fieldErrors)[0]
-    return Array.isArray(first) ? first[0] : first
-  }
-  return err?.response?.data?.message ?? 'Something went wrong. Please try again.'
-}
-
-const EMPTY = { name: '', email: '', address: '', password: '' }
+const INITIAL_FORM_STATE = { name: '', email: '', address: '', password: '' }
 
 export default function RegisterPage() {
   const { user, saveSession } = useAuth()
   const navigate = useNavigate()
 
-  const [form, setForm] = useState(EMPTY)
+  const [form, setForm] = useState(INITIAL_FORM_STATE)
   const [errors, setErrors] = useState({})
   const [serverError, setServerError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // Already logged in — send home
+  // Already logged in — redirect to home
   if (user) return <Navigate to="/" replace />
 
-  function set(field) {
+  function handleChange(field) {
     return (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }))
   }
 
   function validate() {
-    const e = {}
-    if (!form.name.trim()) {
-      e.name = 'Name is required'
-    } else if (form.name.trim().length < 20) {
-      e.name = 'Name must be at least 20 characters'
-    } else if (form.name.trim().length > 60) {
-      e.name = 'Name must be at most 60 characters'
-    }
+    const errs = {}
+    const nameErr = validateName(form.name)
+    if (nameErr) errs.name = nameErr
 
-    if (!form.email) {
-      e.email = 'Email is required'
-    } else if (!/\S+@\S+\.\S+/.test(form.email)) {
-      e.email = 'Enter a valid email address'
-    }
+    const emailErr = validateEmail(form.email)
+    if (emailErr) errs.email = emailErr
 
-    if (!form.address.trim()) {
-      e.address = 'Address is required'
-    } else if (form.address.trim().length > 400) {
-      e.address = 'Address must be at most 400 characters'
-    }
+    const addressErr = validateAddress(form.address)
+    if (addressErr) errs.address = addressErr
 
-    if (!form.password) {
-      e.password = 'Password is required'
-    } else if (form.password.length < 8 || form.password.length > 16) {
-      e.password = 'Password must be 8–16 characters'
-    } else if (!/[A-Z]/.test(form.password)) {
-      e.password = 'Password must contain at least one uppercase letter'
-    } else if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(form.password)) {
-      e.password = 'Password must contain at least one special character'
-    }
+    const passwordErr = validatePassword(form.password)
+    if (passwordErr) errs.password = passwordErr
 
-    return e
+    return errs
   }
 
   async function handleSubmit(e) {
@@ -74,7 +53,7 @@ export default function RegisterPage() {
     setServerError('')
 
     const fieldErrors = validate()
-    if (Object.keys(fieldErrors).length) {
+    if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors)
       return
     }
@@ -82,17 +61,17 @@ export default function RegisterPage() {
 
     try {
       setSubmitting(true)
-      // Role is not sent — backend always creates normal USER accounts via this endpoint
-      const { user, token } = await register({
+      // Normal USER accounts are created via this registration endpoint
+      const { user: registeredUser, token } = await register({
         name: form.name.trim(),
         email: form.email.trim(),
         address: form.address.trim(),
         password: form.password,
       })
-      saveSession(user, token)
+      saveSession(registeredUser, token)
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      setServerError(getErrorMessage(err))
+      setServerError(getErrorMessage(err, 'Failed to create account. Please try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -101,15 +80,18 @@ export default function RegisterPage() {
   return (
     <AuthLayout title="Create an account">
       {serverError && (
-        <p role="alert" style={{
-          fontSize: '0.875rem',
-          color: 'var(--color-error)',
-          backgroundColor: 'var(--color-error-bg)',
-          border: '1px solid #fecaca',
-          borderRadius: 'var(--radius)',
-          padding: 'var(--sp-3)',
-          marginBottom: 'var(--sp-5)',
-        }}>
+        <p
+          role="alert"
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--color-error)',
+            backgroundColor: 'var(--color-error-bg)',
+            border: '1px solid #fecaca',
+            borderRadius: 'var(--radius)',
+            padding: 'var(--sp-3)',
+            marginBottom: 'var(--sp-5)',
+          }}
+        >
           {serverError}
         </p>
       )}
@@ -121,7 +103,7 @@ export default function RegisterPage() {
             label="Full name"
             autoComplete="name"
             value={form.name}
-            onChange={set('name')}
+            onChange={handleChange('name')}
             error={errors.name}
             hint="20–60 characters"
             required
@@ -133,7 +115,7 @@ export default function RegisterPage() {
             type="email"
             autoComplete="email"
             value={form.email}
-            onChange={set('email')}
+            onChange={handleChange('email')}
             error={errors.email}
             required
           />
@@ -143,8 +125,9 @@ export default function RegisterPage() {
             label="Address"
             autoComplete="street-address"
             value={form.address}
-            onChange={set('address')}
+            onChange={handleChange('address')}
             error={errors.address}
+            hint="Maximum 400 characters"
             required
           />
 
@@ -154,13 +137,18 @@ export default function RegisterPage() {
             type="password"
             autoComplete="new-password"
             value={form.password}
-            onChange={set('password')}
+            onChange={handleChange('password')}
             error={errors.password}
             hint="8–16 characters, one uppercase, one special character"
             required
           />
 
-          <Button type="submit" variant="primary" disabled={submitting} style={{ width: '100%', marginTop: 'var(--sp-2)' }}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={submitting}
+            style={{ width: '100%', marginTop: 'var(--sp-2)' }}
+          >
             {submitting ? 'Creating account…' : 'Create account'}
           </Button>
         </div>

@@ -1,30 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Store as StoreIcon, Star, Users } from 'lucide-react'
 import MainLayout from '../../layouts/MainLayout'
 import Loader from '../../components/common/Loader'
 import EmptyState from '../../components/common/EmptyState'
-import { useAuth } from '../../context/AuthContext'
+import StatCard from '../../components/common/StatCard'
+import { useAuth } from '../../hooks/useAuth'
 import { getOwnerDashboard, getOwnerRatings } from '../../services/owner.service'
-import { Store as StoreIcon, Star, Users } from 'lucide-react'
-
-/* ── Small reusable pieces ────────────────────────────── */
-
-function StatCard({ title, value, icon: Icon }) {
-  return (
-    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-      <div style={{
-        width: '48px', height: '48px', borderRadius: 'var(--radius)',
-        backgroundColor: 'var(--color-primary-light)', display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-      }}>
-        <Icon size={24} color="var(--color-primary)" />
-      </div>
-      <div>
-        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>{title}</p>
-        <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{value}</p>
-      </div>
-    </div>
-  )
-}
+import { getErrorMessage } from '../../utils/errorHandler'
+import { formatDate, formatRating } from '../../utils/formatters'
 
 function StoreCard({ store }) {
   return (
@@ -43,19 +26,17 @@ function StoreCard({ store }) {
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Avg Rating</p>
           <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-primary)' }}>
-            {store.average_rating ? Number(store.average_rating).toFixed(1) : '—'}
+            {store.average_rating ? formatRating(store.average_rating) : '—'}
           </p>
         </div>
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Ratings</p>
-          <p style={{ fontSize: '1.25rem', fontWeight: 700 }}>{store.total_ratings}</p>
+          <p style={{ fontSize: '1.25rem', fontWeight: 700 }}>{store.total_ratings ?? 0}</p>
         </div>
       </div>
     </div>
   )
 }
-
-/* ── Main page ────────────────────────────────────────── */
 
 export default function OwnerDashboard() {
   const { user } = useAuth()
@@ -70,49 +51,63 @@ export default function OwnerDashboard() {
   const [sortOrder, setSortOrder] = useState('desc')
 
   useEffect(() => {
+    let isSubscribed = true
+
     async function fetchData() {
       setLoading(true)
       setError('')
       try {
-        // Fetch dashboard (stores) first; the API returns 404 when the owner has no stores.
         let storesData = []
         try {
           const dashRes = await getOwnerDashboard()
           storesData = dashRes.stores ?? []
         } catch (err) {
-          // 404 = no stores, which is a valid empty state, not an error.
+          // 404 indicates the owner has no stores assigned yet, which is valid empty state
           if (err.response?.status !== 404) throw err
         }
 
-        // Fetch ratings (always returns 200 with an array, possibly empty).
         const ratingsRes = await getOwnerRatings()
 
-        setStores(storesData)
-        setRatings(ratingsRes.ratings ?? [])
-      } catch {
-        setError('Failed to load dashboard data. Please try again later.')
+        if (isSubscribed) {
+          setStores(storesData)
+          setRatings(ratingsRes.ratings ?? [])
+        }
+      } catch (err) {
+        if (isSubscribed) {
+          setError(getErrorMessage(err, 'Failed to load dashboard data. Please try again later.'))
+        }
       } finally {
-        setLoading(false)
+        if (isSubscribed) {
+          setLoading(false)
+        }
       }
     }
+
     fetchData()
+
+    return () => {
+      isSubscribed = false
+    }
   }, [])
 
-  /* ── Derived stats ────────────────────────────────── */
+  /* Derived stats */
   const totalStores = stores.length
   const totalRatings = stores.reduce((sum, s) => sum + (s.total_ratings ?? 0), 0)
-  const overallAvg = totalRatings > 0
-    ? (stores.reduce((sum, s) => sum + (s.average_rating ?? 0) * (s.total_ratings ?? 0), 0) / totalRatings).toFixed(1)
-    : '—'
+  const overallAvg =
+    totalRatings > 0
+      ? (
+          stores.reduce((sum, s) => sum + (s.average_rating ?? 0) * (s.total_ratings ?? 0), 0) /
+          totalRatings
+        ).toFixed(1)
+      : '—'
 
-  /* ── Sorted ratings ───────────────────────────────── */
+  /* Sorted ratings */
   const sortedRatings = useMemo(() => {
     const copy = [...ratings]
     copy.sort((a, b) => {
       let aVal = a[sortField]
       let bVal = b[sortField]
 
-      // For string fields, compare case-insensitively
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         aVal = aVal.toLowerCase()
         bVal = bVal.toLowerCase()
@@ -127,7 +122,7 @@ export default function OwnerDashboard() {
 
   function handleSort(field) {
     if (sortField === field) {
-      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'))
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortField(field)
       setSortOrder('asc')
@@ -138,8 +133,6 @@ export default function OwnerDashboard() {
     if (sortField !== field) return null
     return <span aria-hidden="true"> {sortOrder === 'asc' ? '▲' : '▼'}</span>
   }
-
-  /* ── Render ───────────────────────────────────────── */
 
   return (
     <MainLayout>
@@ -152,33 +145,37 @@ export default function OwnerDashboard() {
           </p>
         </div>
 
-        {/* Loading / Error */}
+        {/* Loading / Error / Content */}
         {loading ? (
           <Loader label="Loading dashboard…" />
         ) : error ? (
-          <div style={{
-            color: 'var(--color-error)',
-            padding: 'var(--sp-4)',
-            backgroundColor: 'var(--color-error-bg)',
-            borderRadius: 'var(--radius)',
-          }}>
+          <div
+            style={{
+              color: 'var(--color-error)',
+              padding: 'var(--sp-4)',
+              backgroundColor: 'var(--color-error-bg)',
+              borderRadius: 'var(--radius)',
+            }}
+          >
             {error}
           </div>
         ) : (
           <>
             {/* Summary stat cards */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 'var(--sp-6)',
-              marginBottom: 'var(--sp-8)',
-            }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 'var(--sp-6)',
+                marginBottom: 'var(--sp-8)',
+              }}
+            >
               <StatCard title="Total Stores" value={totalStores} icon={StoreIcon} />
               <StatCard title="Total Ratings" value={totalRatings} icon={Star} />
               <StatCard title="Overall Avg Rating" value={overallAvg} icon={Users} />
             </div>
 
-            {/* ── My Stores ──────────────────────────── */}
+            {/* My Stores */}
             <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>
               My Stores
             </h2>
@@ -190,13 +187,13 @@ export default function OwnerDashboard() {
               />
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)', marginBottom: 'var(--sp-10)' }}>
-                {stores.map(store => (
+                {stores.map((store) => (
                   <StoreCard key={store.id} store={store} />
                 ))}
               </div>
             )}
 
-            {/* ── Ratings Received ───────────────────── */}
+            {/* Ratings Received */}
             <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>
               Ratings Received
             </h2>
@@ -216,7 +213,7 @@ export default function OwnerDashboard() {
                         { key: 'user_name', label: 'Customer' },
                         { key: 'rating', label: 'Rating' },
                         { key: 'rated_at', label: 'Date' },
-                      ].map(col => (
+                      ].map((col) => (
                         <th
                           key={col.key}
                           onClick={() => handleSort(col.key)}
@@ -239,7 +236,7 @@ export default function OwnerDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRatings.map(r => (
+                    {sortedRatings.map((r) => (
                       <tr key={r.rating_id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                         <td style={{ padding: 'var(--sp-3) var(--sp-4)' }}>{r.store_name}</td>
                         <td style={{ padding: 'var(--sp-3) var(--sp-4)' }}>{r.user_name}</td>
@@ -247,7 +244,7 @@ export default function OwnerDashboard() {
                           {r.rating} / 5
                         </td>
                         <td style={{ padding: 'var(--sp-3) var(--sp-4)', color: 'var(--color-text-muted)' }}>
-                          {new Date(r.rated_at).toLocaleDateString()}
+                          {formatDate(r.rated_at)}
                         </td>
                       </tr>
                     ))}

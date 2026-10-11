@@ -1,32 +1,37 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { AuthContext } from './authContextInstance'
 import { getMe } from '../services/auth.service'
-
-const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true) // true while restoring session
+  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem('token')))
 
-  // On mount, restore session if a token exists
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (!token) {
-      setLoading(false)
-      return
-    }
+    if (!token) return
+
+    let isSubscribed = true
 
     getMe()
-      .then(setUser)
-      .catch(() => {
-        // Token is expired or invalid — clear it
-        localStorage.removeItem('token')
+      .then((userData) => {
+        if (isSubscribed) setUser(userData)
       })
-      .finally(() => setLoading(false))
+      .catch(() => {
+        localStorage.removeItem('token')
+        if (isSubscribed) setUser(null)
+      })
+      .finally(() => {
+        if (isSubscribed) setLoading(false)
+      })
+
+    return () => {
+      isSubscribed = false
+    }
   }, [])
 
-  function saveSession(user, token) {
+  function saveSession(userData, token) {
     localStorage.setItem('token', token)
-    setUser(user)
+    setUser(userData)
   }
 
   function logout() {
@@ -39,10 +44,4 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
-  return ctx
 }

@@ -14,3 +14,11 @@ export async function getMe() {
   const { data } = await api.get('/auth/me')
   return data.data.user
 }
+
+export async function changePassword(currentPassword, newPassword) {
+  const { data } = await api.patch('/auth/change-password', {
+    currentPassword,
+    newPassword,
+  })
+  return data
+}
